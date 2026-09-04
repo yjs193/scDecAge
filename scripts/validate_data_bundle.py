@@ -58,9 +58,13 @@ def main() -> None:
                 dataset_missing = True
         if dataset_missing:
             continue
-        ids = np.load(root / "cache/gene_ids.int32.npy", mmap_mode="r")
-        values = np.load(root / "cache/expression_values.float16.npy", mmap_mode="r")
-        pathways = np.load(root / "cache/pathway_scores.float16.npy", mmap_mode="r")
+        gene_ids = np.load(root / "cache/gene_ids.int32.npy", mmap_mode="r")
+        expression_values = np.load(
+            root / "cache/expression_values.float16.npy", mmap_mode="r"
+        )
+        pathway_activity = np.load(
+            root / "cache/pathway_scores.float16.npy", mmap_mode="r"
+        )
         metadata = pd.read_parquet(root / "cache/cell_metadata.parquet")
         splits = pd.read_csv(root / "donor_splits.csv")
         required_metadata = {"cell_index", "donor_id", "age_years", "cell_type"}
@@ -71,11 +75,16 @@ def main() -> None:
             metadata["cell_index"].to_numpy(), np.arange(len(metadata))
         ):
             errors.append(f"{dataset}: cell_index must match cache row order")
-        if not (len(ids) == len(values) == len(pathways) == len(metadata)):
+        if not (
+            len(gene_ids)
+            == len(expression_values)
+            == len(pathway_activity)
+            == len(metadata)
+        ):
             errors.append(f"{dataset}: inconsistent cache row counts")
-        if ids.shape != values.shape:
+        if gene_ids.shape != expression_values.shape:
             errors.append(f"{dataset}: gene ID and expression arrays have different shapes")
-        if pathways.ndim != 2:
+        if pathway_activity.ndim != 2:
             errors.append(f"{dataset}: pathway score cache must be two-dimensional")
         required_splits = {"donor_id", "split"}
         if missing := required_splits - set(splits):
@@ -117,7 +126,7 @@ def main() -> None:
         ):
             errors.append(f"{dataset}: pairwise Program overlap exceeds two pathways")
         pathway_names = json.loads((root / "cache/pathway_names.json").read_text())
-        if pathways.shape[1] != len(pathway_names):
+        if pathway_activity.shape[1] != len(pathway_names):
             errors.append(f"{dataset}: pathway names and score columns differ")
         unknown_pathways = set(route["pathway"]) - set(pathway_names)
         if unknown_pathways:
@@ -170,8 +179,8 @@ def main() -> None:
         summary_rows.append({
             "dataset": dataset,
             "cells": len(metadata),
-            "token_width": ids.shape[1],
-            "pathways": pathways.shape[1],
+            "token_width": gene_ids.shape[1],
+            "pathways": pathway_activity.shape[1],
             "programs": route["program"].nunique(),
             "train_donors": len(donor_sets["train"]),
             "validation_donors": len(donor_sets["val"]),

@@ -18,8 +18,9 @@ integrates the cellular representations through two complementary streams:
    functional programs. A compact two-layer Program Transformer models
    interactions among the resulting donor-specific program states.
 
-The global estimate and pathway-program correction are integrated by an
-adaptive gate before prediction is mapped to the dataset-specific age range.
+The global population and pathway-program representations are integrated by a
+feature-wise gate before the normalized prediction is transformed back to
+chronological age in years.
 The implementation therefore follows the manuscript workflow:
 
 ```text
@@ -40,7 +41,7 @@ global population context       donor-specific program states
              individual-level age estimate
 ```
 
-This repository contains the final checkpoint-compatible architecture and the
+This repository contains the manuscript-aligned reference architecture and the
 data preparation, training, prediction, and validation code needed to run it.
 Model-screening variants, manuscript figure scripts, exploratory analyses, raw
 data, and large checkpoints are intentionally excluded.

@@ -16,8 +16,8 @@ from scipy import sparse
 def tokenize(matrix, mapper: np.ndarray, max_genes: int) -> tuple[np.ndarray, np.ndarray]:
     if not sparse.isspmatrix_csr(matrix):
         matrix = sparse.csr_matrix(matrix)
-    ids = np.zeros((matrix.shape[0], max_genes), dtype=np.int32)
-    values = np.zeros((matrix.shape[0], max_genes), dtype=np.float16)
+    gene_ids = np.zeros((matrix.shape[0], max_genes), dtype=np.int32)
+    expression_values = np.zeros((matrix.shape[0], max_genes), dtype=np.float16)
     for row in range(matrix.shape[0]):
         start, end = matrix.indptr[row], matrix.indptr[row + 1]
         columns = matrix.indices[start:end]
@@ -28,9 +28,9 @@ def tokenize(matrix, mapper: np.ndarray, max_genes: int) -> tuple[np.ndarray, np
             selected = np.argpartition(expression, -max_genes)[-max_genes:]
             columns, expression = columns[selected], expression[selected]
         length = len(columns)
-        ids[row, :length] = mapper[columns]
-        values[row, :length] = expression / math.log(2.0)
-    return ids, values
+        gene_ids[row, :length] = mapper[columns]
+        expression_values[row, :length] = expression / math.log(2.0)
+    return gene_ids, expression_values
 
 
 def main() -> None:
@@ -59,21 +59,24 @@ def main() -> None:
         raise ValueError(f"Vocabulary does not cover {len(missing)} genes: {missing[:10]}")
     mapper = np.asarray([vocab[gene] for gene in symbols], dtype=np.int32)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    ids_out = open_memmap(
+    gene_ids_out = open_memmap(
         args.output_dir / "gene_ids.int32.npy", mode="w+", dtype=np.int32,
         shape=(adata.n_obs, args.max_genes)
     )
-    values_out = open_memmap(
+    expression_values_out = open_memmap(
         args.output_dir / "expression_values.float16.npy", mode="w+", dtype=np.float16,
         shape=(adata.n_obs, args.max_genes)
     )
     for start in range(0, adata.n_obs, args.chunk_size):
         end = min(start + args.chunk_size, adata.n_obs)
-        ids, values = tokenize(adata.X[start:end], mapper, args.max_genes)
-        ids_out[start:end], values_out[start:end] = ids, values
+        gene_ids, expression_values = tokenize(
+            adata.X[start:end], mapper, args.max_genes
+        )
+        gene_ids_out[start:end] = gene_ids
+        expression_values_out[start:end] = expression_values
         print(f"tokenized {end:,}/{adata.n_obs:,} cells", flush=True)
-    ids_out.flush()
-    values_out.flush()
+    gene_ids_out.flush()
+    expression_values_out.flush()
 
     if args.cell_type_column in adata.obs:
         cell_types = adata.obs[args.cell_type_column].astype(str)

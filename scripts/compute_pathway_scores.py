@@ -66,16 +66,23 @@ def main() -> None:
         device="cpu"
     )
     names = list(signatures)
-    scores = adata.obs[[f"{name}_UCell" for name in names]].to_numpy(np.float32)
+    pathway_activity = adata.obs[
+        [f"{name}_UCell" for name in names]
+    ].to_numpy(np.float32)
     split = pd.read_csv(args.split)
     train_donors = set(split.loc[split["split"].eq("train"), "donor_id"].astype(str))
     train_mask = adata.obs[args.donor_column].astype(str).isin(train_donors).to_numpy()
     if not train_mask.any():
         raise ValueError("No h5ad cells match the training donors in the split file")
-    variance = scores[train_mask].var(axis=0)
-    selected = np.argsort(-variance, kind="stable")[: min(args.top_pathways, scores.shape[1])]
+    variance = pathway_activity[train_mask].var(axis=0)
+    selected = np.argsort(-variance, kind="stable")[:
+        min(args.top_pathways, pathway_activity.shape[1])
+    ]
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    np.save(args.output_dir / "pathway_scores.float16.npy", scores[:, selected].astype(np.float16))
+    np.save(
+        args.output_dir / "pathway_scores.float16.npy",
+        pathway_activity[:, selected].astype(np.float16),
+    )
     np.save(args.output_dir / "pathway_train_variance.float32.npy", variance[selected])
     (args.output_dir / "pathway_names.json").write_text(
         json.dumps([names[index] for index in selected], indent=2) + "\n"

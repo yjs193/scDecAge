@@ -14,7 +14,7 @@ except (ImportError, OSError):
 
 
 class FlashAttention(nn.Module):
-    """Checkpoint-compatible attention with a native PyTorch fallback."""
+    """Multihead attention with an optional FlashAttention fast path."""
 
     def __init__(self, dim: int, num_heads: int = 8, qkv_bias: bool = False,
                  attn_drop: float = 0.0, proj_drop: float = 0.0) -> None:
@@ -25,16 +25,26 @@ class FlashAttention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, valid_tokens: torch.Tensor | None = None
+    ) -> torch.Tensor:
         batch, tokens, channels = x.shape
         qkv = self.qkv(x).reshape(batch, tokens, 3, self.num_heads, channels // self.num_heads)
         dropout = self.attn_drop.p if self.training else 0.0
-        if flash_attn_qkvpacked_func is not None and x.is_cuda:
+        all_tokens_valid = valid_tokens is None or bool(valid_tokens.all())
+        if flash_attn_qkvpacked_func is not None and x.is_cuda and all_tokens_valid:
             output = flash_attn_qkvpacked_func(qkv, dropout_p=dropout).reshape(batch, tokens, channels)
         else:
             query, key, value = qkv.unbind(dim=2)
+            attention_mask = (
+                None if valid_tokens is None else valid_tokens[:, None, None, :]
+            )
             output = F.scaled_dot_product_attention(
-                query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2), dropout_p=dropout
+                query.transpose(1, 2),
+                key.transpose(1, 2),
+                value.transpose(1, 2),
+                attn_mask=attention_mask,
+                dropout_p=dropout,
             ).transpose(1, 2).reshape(batch, tokens, channels)
         return self.proj_drop(self.proj(output))
 
@@ -53,6 +63,8 @@ class FlashAttentionBlock(nn.Module):
         self.norm2 = norm_layer(dim)
         self.mlp = Mlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.drop_path(self.attn(self.norm1(x)))
+    def forward(
+        self, x: torch.Tensor, valid_tokens: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        x = x + self.drop_path(self.attn(self.norm1(x), valid_tokens))
         return x + self.drop_path(self.mlp(self.norm2(x)))

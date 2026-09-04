@@ -18,10 +18,9 @@ def test_manuscript_config_invariants() -> None:
         config = json.loads((ROOT / "configs" / filename).read_text())
         assert config["max_genes"] == max_genes
         assert list(config["batch_size_by_cells"].values()) == batch_sizes
-        assert config["learning_rate"] == head_lr
-        assert config["encoder_lr"] == encoder_lr
+        assert config["head_learning_rate"] == head_lr
+        assert config["encoder_learning_rate"] == encoder_lr
         assert config["num_programs"] == 64
-        assert config["freeze_program_routes"] is True
         assert config["patience"] == 5
         assert config["max_grad_norm"] == 5.0
         assert config["minimum_lr_factor"] == 0.1

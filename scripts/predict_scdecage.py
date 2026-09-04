@@ -29,14 +29,6 @@ def main() -> None:
         config = json.loads(args.config.read_text())
     else:
         config = dict(payload["config"])
-        if "age_min" not in config:
-            info = json.loads((args.dataset_dir / "dataset_info.json").read_text())
-            config["age_min"], config["age_max"] = info["age_range_years"]
-            config["num_programs"] = config.get("num_slots", 64)
-            config["pathway_weight"] = config.get("lambda_path", 0.1)
-            config["program_gate_init"] = config.get("slot_gate_init", -2.0)
-            config["freeze_program_routes"] = config.get("freeze_route_logits", True)
-            config["cell_pool"] = f"cell_pools/cells{config['cells_per_donor']}.parquet"
     dataset = DonorProgramDataset(
         args.dataset_dir,
         args.split,

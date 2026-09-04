@@ -39,9 +39,9 @@ def main() -> None:
     rows = []
     with torch.inference_mode():
         for batch in loader:
-            gene_ids, values, pathways = move_batch(batch, device)
-            output = model(gene_ids, values, pathways)
-            weights = output["aux"][0]["cell_weights"].float().cpu().numpy()
+            gene_ids, expression_values, pathway_activity = move_batch(batch, device)
+            output = model(gene_ids, expression_values, pathway_activity)
+            weights = output["aux"][0]["cellular_importance"].float().cpu().numpy()
             percentile = pd.Series(weights).rank(method="average", pct=True).to_numpy()
             for cell_index, cell_type, weight, rank in zip(
                 batch["cell_indices"][0], batch["cell_types"][0], weights, percentile
@@ -51,8 +51,8 @@ def main() -> None:
                     "age_years": float(batch["age"][0]),
                     "cell_index": int(cell_index),
                     "cell_type": str(cell_type),
-                    "raga_weight": float(weight),
-                    "within_donor_weight_percentile": float(rank),
+                    "cellular_importance": float(weight),
+                    "within_individual_importance_percentile": float(rank),
                 })
     args.output.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_parquet(args.output, index=False)

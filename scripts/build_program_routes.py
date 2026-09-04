@@ -22,10 +22,13 @@ def main() -> None:
     args = parser.parse_args()
 
     cache = args.dataset_dir / "cache"
-    scores = np.load(cache / "pathway_scores.float16.npy", mmap_mode="r")
-    if scores.shape[1] < args.num_programs:
+    pathway_activity = np.load(
+        cache / "pathway_scores.float16.npy", mmap_mode="r"
+    )
+    if pathway_activity.shape[1] < args.num_programs:
         raise ValueError(
-            f"Need at least {args.num_programs} pathways, found {scores.shape[1]}"
+            "Need at least "
+            f"{args.num_programs} pathways, found {pathway_activity.shape[1]}"
         )
     metadata = pd.read_parquet(cache / "cell_metadata.parquet")
     splits = pd.read_csv(args.dataset_dir / "donor_splits.csv")
@@ -37,7 +40,9 @@ def main() -> None:
     selected_cells = rng.choice(
         train_indices, min(args.sample_cells, len(train_indices)), replace=False
     )
-    sampled = np.nan_to_num(np.asarray(scores[selected_cells], dtype=np.float32))
+    sampled = np.nan_to_num(
+        np.asarray(pathway_activity[selected_cells], dtype=np.float32)
+    )
     variance_order = np.argsort(-sampled.var(axis=0))
     scaled = (sampled - sampled.mean(axis=0, keepdims=True))
     scaled /= sampled.std(axis=0, keepdims=True) + 1e-6

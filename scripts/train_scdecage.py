@@ -103,12 +103,12 @@ def main() -> None:
         [
             {
                 "params": model.encoder.parameters(),
-                "lr": config["encoder_lr"],
+                "lr": config["encoder_learning_rate"],
                 "name": "cell_encoder",
             },
             {
                 "params": model.aggregator.parameters(),
-                "lr": config["learning_rate"],
+                "lr": config["head_learning_rate"],
                 "name": "donor_model",
             },
         ],
@@ -140,7 +140,7 @@ def main() -> None:
         losses = []
         for batch in loaders["train"]:
             optimizer.zero_grad(set_to_none=True)
-            gene_ids, values, pathways = move_batch(batch, device)
+            gene_ids, expression_values, pathway_activity = move_batch(batch, device)
             age = batch["age"].to(device)
             target = (age - age_center) / age_half
             amp = torch.autocast(
@@ -149,16 +149,11 @@ def main() -> None:
                 enabled=device.type == "cuda" and not args.no_amp,
             )
             with amp:
-                output = model(gene_ids, values, pathways)
+                output = model(gene_ids, expression_values, pathway_activity)
                 prediction = (output["pred_age"] - age_center) / age_half
                 loss = F.smooth_l1_loss(
                     prediction, target, beta=config.get("huber_beta", 0.15)
                 )
-                reconstruction_weight = config.get("pathway_reconstruction_weight", 0.0)
-                if reconstruction_weight:
-                    loss = loss + reconstruction_weight * output[
-                        "pathway_reconstruction_loss"
-                    ].mean()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.get("max_grad_norm", 10.0))
             optimizer.step()
@@ -169,8 +164,8 @@ def main() -> None:
         row = {
             "epoch": epoch,
             "train_loss": float(np.mean(losses)),
-            "encoder_lr": optimizer.param_groups[0]["lr"],
-            "learning_rate": optimizer.param_groups[1]["lr"],
+            "encoder_learning_rate": optimizer.param_groups[0]["lr"],
+            "head_learning_rate": optimizer.param_groups[1]["lr"],
             **{f"val_{key}": value for key, value in val_metrics.items()},
         }
         history.append(row)

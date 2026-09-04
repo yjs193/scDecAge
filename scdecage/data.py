@@ -22,14 +22,21 @@ class DonorProgramDataset(Dataset):
     ) -> None:
         self.dataset_dir = Path(dataset_dir)
         cache = self.dataset_dir / "cache"
-        self.ids = np.load(cache / "gene_ids.int32.npy", mmap_mode="r")
-        self.values = np.load(cache / "expression_values.float16.npy", mmap_mode="r")
-        self.pathway_scores = np.load(cache / "pathway_scores.float16.npy", mmap_mode="r")
+        self.gene_ids = np.load(cache / "gene_ids.int32.npy", mmap_mode="r")
+        self.expression_values = np.load(
+            cache / "expression_values.float16.npy", mmap_mode="r"
+        )
+        self.pathway_activity = np.load(cache / "pathway_scores.float16.npy", mmap_mode="r")
         self.metadata = pd.read_parquet(cache / "cell_metadata.parquet")
-        if not (len(self.ids) == len(self.values) == len(self.pathway_scores) == len(self.metadata)):
+        if not (
+            len(self.gene_ids)
+            == len(self.expression_values)
+            == len(self.pathway_activity)
+            == len(self.metadata)
+        ):
             raise RuntimeError("Token, pathway, and metadata caches have different cell counts")
-        if max_genes <= 0 or max_genes > self.ids.shape[1]:
-            raise ValueError(f"max_genes must be in [1, {self.ids.shape[1]}]")
+        if max_genes <= 0 or max_genes > self.gene_ids.shape[1]:
+            raise ValueError(f"max_genes must be in [1, {self.gene_ids.shape[1]}]")
 
         splits = pd.read_csv(self.dataset_dir / "donor_splits.csv")
         splits["donor_id"] = splits["donor_id"].astype(str)
@@ -83,11 +90,15 @@ class DonorProgramDataset(Dataset):
             "age": np.float32(self.ages[donor]),
             "cell_indices": selected.astype(np.int64, copy=False),
             "cell_types": self.metadata.iloc[selected]["cell_type"].astype(str).to_numpy(),
-            "gene_ids": np.asarray(self.ids[selected, : self.max_genes], dtype=np.int64),
-            "expression_values": np.asarray(
-                self.values[selected, : self.max_genes], dtype=np.float32
+            "gene_ids": np.asarray(
+                self.gene_ids[selected, : self.max_genes], dtype=np.int64
             ),
-            "pathway_scores": np.asarray(self.pathway_scores[selected], dtype=np.float32),
+            "expression_values": np.asarray(
+                self.expression_values[selected, : self.max_genes], dtype=np.float32
+            ),
+            "pathway_activity": np.asarray(
+                self.pathway_activity[selected], dtype=np.float32
+            ),
         }
 
 
@@ -99,5 +110,7 @@ def collate_donors(batch: list[dict]) -> dict:
         "cell_types": [item["cell_types"] for item in batch],
         "gene_ids": [torch.from_numpy(item["gene_ids"]) for item in batch],
         "expression_values": [torch.from_numpy(item["expression_values"]) for item in batch],
-        "pathway_scores": [torch.from_numpy(item["pathway_scores"]) for item in batch],
+        "pathway_activity": [
+            torch.from_numpy(item["pathway_activity"]) for item in batch
+        ],
     }

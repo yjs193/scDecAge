@@ -14,22 +14,18 @@ def evaluate(model, loader, device: torch.device) -> tuple[dict, pd.DataFrame]:
     model.eval()
     rows = []
     for batch in loader:
-        gene_ids, values, pathways = move_batch(batch, device)
-        output = model(gene_ids, values, pathways)
-        for donor, age, prediction, global_age, delta in zip(
+        gene_ids, expression_values, pathway_activity = move_batch(batch, device)
+        output = model(gene_ids, expression_values, pathway_activity)
+        for donor, age, prediction in zip(
             batch["donor_id"],
             batch["age"],
             output["pred_age"].float().cpu(),
-            output["global_age"].float().cpu(),
-            output["program_age_delta"].float().cpu(),
         ):
             rows.append(
                 {
                     "donor_id": donor,
                     "age_years": float(age),
                     "predicted_age": float(prediction),
-                    "global_stream_age": float(global_age),
-                    "program_age_delta": float(delta),
                 }
             )
     frame = pd.DataFrame(rows)

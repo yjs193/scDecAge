@@ -62,19 +62,11 @@ three manuscript sampling depths without editing the source code.
 ## Prediction outputs
 
 `scripts/predict_scdecage.py` writes one row per individual containing the
-observed age, final prediction, global-stream prediction, and Program-branch
-correction. Its metrics file reports donor-level MAE, RMSE, R-squared, Pearson
-correlation, and Spearman correlation.
+observed age and final scDecAge prediction. Its metrics file reports
+individual-level MAE, RMSE, R-squared, Pearson correlation, and Spearman
+correlation.
 
 `scripts/export_cell_importance.py` exports the normalized RAGA cellular
-weights and within-individual weight percentiles for post hoc cellular
+weights and within-individual importance percentiles for post hoc cellular
 analysis. Cell-type annotations are carried through only for those downstream
 analyses; they are not inputs to scDecAge.
-
-## Terminology and checkpoint compatibility
-
-The exploratory source tree used `AgeFormer` and `slot` in some class names and
-checkpoint keys. The manuscript and public interface use `scDecAge` and
-`Program`. Compatibility-only parameter names are documented in
-`MODEL_ARCHITECTURE.md` and should not be interpreted as additional model
-components.
