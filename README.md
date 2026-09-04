@@ -36,7 +36,7 @@ python scripts/train_scdecage.py \
   --data-root /path/to/scDecAge_Data \
 ```
 
-## Prediction and cellular weights
+## Prediction
 
 ```bash
 python scripts/predict_scdecage.py \
