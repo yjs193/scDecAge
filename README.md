@@ -24,12 +24,6 @@ conda activate scdecage
 pip install -e .
 ```
 
-Install the optional preprocessing dependencies when rebuilding pathway
-activity caches from h5ad files:
-
-```bash
-pip install -e '.[preprocess]'
-```
 
 FlashAttention is optional. If it is unavailable, the cell encoder uses
 PyTorch scaled dot-product attention with the same learned parameters.
