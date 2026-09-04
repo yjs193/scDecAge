@@ -43,9 +43,12 @@ def main() -> None:
     parser.add_argument("--max-rank", type=int, default=1500)
     parser.add_argument("--chunk-size", type=int, default=500)
     parser.add_argument("--n-jobs", type=int, default=min(24, os.cpu_count() or 1))
+    parser.add_argument("--donor-column", default="donor_id")
     args = parser.parse_args()
 
     adata = ad.read_h5ad(args.h5ad)
+    if args.donor_column not in adata.obs:
+        raise ValueError(f"h5ad obs is missing donor column: {args.donor_column}")
     symbols = (
         adata.var["feature_name"] if "feature_name" in adata.var else adata.var_names
     ).astype(str).to_numpy()
@@ -66,7 +69,9 @@ def main() -> None:
     scores = adata.obs[[f"{name}_UCell" for name in names]].to_numpy(np.float32)
     split = pd.read_csv(args.split)
     train_donors = set(split.loc[split["split"].eq("train"), "donor_id"].astype(str))
-    train_mask = adata.obs["donor_id"].astype(str).isin(train_donors).to_numpy()
+    train_mask = adata.obs[args.donor_column].astype(str).isin(train_donors).to_numpy()
+    if not train_mask.any():
+        raise ValueError("No h5ad cells match the training donors in the split file")
     variance = scores[train_mask].var(axis=0)
     selected = np.argsort(-variance, kind="stable")[: min(args.top_pathways, scores.shape[1])]
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -78,6 +83,19 @@ def main() -> None:
     (args.output_dir / "filtered_reactome.json").write_text(
         json.dumps(signatures, indent=2) + "\n"
     )
+    (args.output_dir / "pathway_cache_metadata.json").write_text(json.dumps({
+        "source_h5ad": args.h5ad.name,
+        "candidate_pathways_after_filtering": len(signatures),
+        "retained_pathways": len(selected),
+        "training_cells_for_variance": int(train_mask.sum()),
+        "minimum_genes_per_pathway": 10,
+        "maximum_genes_per_pathway": 300,
+        "redundancy_jaccard_threshold": 0.90,
+        "ucell_max_rank": args.max_rank,
+        "ucell_ties_method": "average",
+        "selection": "descending_training_cell_activity_variance",
+        "age_labels_used": False,
+    }, indent=2) + "\n")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 from pathlib import Path
 
@@ -22,6 +23,10 @@ def main() -> None:
 
     cache = args.dataset_dir / "cache"
     scores = np.load(cache / "pathway_scores.float16.npy", mmap_mode="r")
+    if scores.shape[1] < args.num_programs:
+        raise ValueError(
+            f"Need at least {args.num_programs} pathways, found {scores.shape[1]}"
+        )
     metadata = pd.read_parquet(cache / "cell_metadata.parquet")
     splits = pd.read_csv(args.dataset_dir / "donor_splits.csv")
     train_donors = set(splits.loc[splits["split"].eq("train"), "donor_id"].astype(str))
@@ -65,11 +70,10 @@ def main() -> None:
             if len(chosen) == args.pathways_per_program:
                 break
         if len(chosen) < args.pathways_per_program:
-            chosen.extend(
-                int(index) for index in candidates
-                if index not in chosen
+            raise RuntimeError(
+                "Unable to construct the requested Program Bank while limiting "
+                "pairwise overlap to two pathways"
             )
-            chosen = chosen[: args.pathways_per_program]
         chosen_sets.append(set(chosen))
         for rank, index in enumerate(chosen, start=1):
             rows.append({
@@ -80,6 +84,22 @@ def main() -> None:
             })
     args.output.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_csv(args.output, index=False)
+    maximum_overlap = max(
+        (len(left & right) for left, right in itertools.combinations(chosen_sets, 2)),
+        default=0,
+    )
+    metadata_output = args.output.with_suffix(".metadata.json")
+    metadata_output.write_text(json.dumps({
+        "training_cells_sampled": len(selected_cells),
+        "num_programs": args.num_programs,
+        "pathways_per_program": args.pathways_per_program,
+        "maximum_pairwise_pathway_overlap": maximum_overlap,
+        "clustering": "MiniBatchKMeans",
+        "clustering_n_init": 3,
+        "clustering_max_iter": 30,
+        "seed": args.seed,
+        "age_labels_used": False,
+    }, indent=2) + "\n")
 
 
 if __name__ == "__main__":

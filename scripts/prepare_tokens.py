@@ -47,6 +47,10 @@ def main() -> None:
 
     vocab = json.loads(args.vocab.read_text())
     adata = ad.read_h5ad(args.h5ad, backed="r")
+    required_obs = {args.donor_column, args.age_column}
+    missing_obs = required_obs - set(adata.obs.columns)
+    if missing_obs:
+        raise ValueError(f"h5ad obs is missing columns: {sorted(missing_obs)}")
     symbols = (
         adata.var["feature_name"] if "feature_name" in adata.var else adata.var_names
     ).astype(str).tolist()
@@ -71,7 +75,12 @@ def main() -> None:
     ids_out.flush()
     values_out.flush()
 
-    cell_types = adata.obs[args.cell_type_column].astype(str)
+    if args.cell_type_column in adata.obs:
+        cell_types = adata.obs[args.cell_type_column].astype(str)
+        cell_type_source = args.cell_type_column
+    else:
+        cell_types = pd.Series("unannotated", index=adata.obs_names, dtype="string")
+        cell_type_source = None
     type_names = sorted(cell_types.unique())
     type_to_id = {name: index for index, name in enumerate(type_names)}
     metadata = pd.DataFrame({
@@ -90,6 +99,7 @@ def main() -> None:
         "max_genes": args.max_genes,
         "vocab_size": len(vocab),
         "expression_transform": "natural_log1p_div_ln2",
+        "cell_type_source": cell_type_source,
         "cell_type_vocabulary": type_to_id,
     }, indent=2) + "\n")
     adata.file.close()

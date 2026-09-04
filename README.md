@@ -1,32 +1,61 @@
 # scDecAge
 
 Official implementation of **scDecAge**, a pathway-guided framework for
-individual-level age prediction from single-cell transcriptomes.
+individual-level chronological-age prediction from single-cell
+transcriptomes.
 
-scDecAge first encodes each cell with a pretrained transcriptomic encoder and
-then integrates donor-level evidence through two complementary components:
+scDecAge treats all sampled cells from one individual as an unordered cellular
+population and returns one age estimate for that individual. The model first
+uses a pretrained transcriptomic Transformer to encode each cell and then
+integrates the cellular representations through two complementary streams:
 
-1. **Residual Adaptive Global Aggregation (RAGA)** preserves the donor-wide
-   mean representation while learning a centered, cell-weighted residual.
-2. **Pathway-guided cellular programs** route cells to shared functional
-   programs using Reactome activity and model program-program interactions with
-   a compact Transformer.
+1. **Residual Adaptive Global Aggregation (RAGA)** retains the donor-wide mean
+   representation and adds a learned, cell-weighted residual. This provides a
+   stable population reference while allowing nonuniform cellular
+   contributions.
+2. **Pathway-Guided Program Aggregation** combines Reactome pathway activity
+   with learned representation similarity to route cells into 64 overlapping
+   functional programs. A compact two-layer Program Transformer models
+   interactions among the resulting donor-specific program states.
 
-The repository contains the final architecture used in the manuscript. Model
-screening variants, figure-generation code, intermediate experiments, raw data,
-and checkpoints are intentionally kept outside this repository.
+The global estimate and pathway-program correction are integrated by an
+adaptive gate before prediction is mapped to the dataset-specific age range.
+The implementation therefore follows the manuscript workflow:
+
+```text
+single-cell transcriptomes
+        |
+pretrained learnable cell encoder
+        |
+        +-------------------------------+
+        |                               |
+Residual Adaptive Global        Pathway-Guided Program
+Aggregation (RAGA)               Aggregation
+        |                               |
+global population context       donor-specific program states
+        +---------------+---------------+
+                        |
+                 adaptive gated fusion
+                        |
+             individual-level age estimate
+```
+
+This repository contains the final checkpoint-compatible architecture and the
+data preparation, training, prediction, and validation code needed to run it.
+Model-screening variants, manuscript figure scripts, exploratory analyses, raw
+data, and large checkpoints are intentionally excluded.
 
 ## Repository layout
 
 ```text
 scDecAge/
-├── configs/                 # Dataset-specific training configurations
-├── docs/                    # Architecture, data, and reproducibility notes
-├── scdecage/                # Installable Python package
-├── scripts/                 # Preprocessing, training, prediction, validation
-├── tests/                   # CPU smoke tests
-├── pyproject.toml
-└── requirements.txt
+|-- configs/                 # Dataset-specific manuscript configurations
+|-- docs/                    # Architecture, data, and reproducibility notes
+|-- scdecage/                # Installable Python package
+|-- scripts/                 # Preprocessing, training, prediction, validation
+|-- tests/                   # CPU tests for model and sampling invariants
+|-- pyproject.toml
+`-- requirements.txt
 ```
 
 ## Installation
@@ -39,18 +68,26 @@ conda activate scdecage
 pip install -e .
 ```
 
-FlashAttention is optional. When it is unavailable, the cell encoder uses
-PyTorch scaled dot-product attention with the same parameterization.
+Install the optional preprocessing dependencies when rebuilding pathway
+activity caches from h5ad files:
+
+```bash
+pip install -e '.[preprocess]'
+```
+
+FlashAttention is optional. If it is unavailable, the cell encoder uses
+PyTorch scaled dot-product attention with the same learned parameters.
 
 ## Data
 
-Large files are distributed separately. The expected Google Drive bundle is
-documented in [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md). Each dataset folder
-contains its processed h5ad file, donor split, training-ready token and pathway
-caches, cell pools, and program-route definitions. Shared resources contain the
-gene vocabulary, pretrained cell-encoder checkpoint, and Reactome gene sets.
+Large files are distributed separately in the `scDecAge_Data` bundle described
+in [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md). Shared resources contain the
+encoder gene vocabulary, pretrained cell-encoder checkpoint, and Reactome gene
+sets. Each dataset directory contains donor-disjoint partitions, token and
+pathway caches, independently sampled cellular inputs, and a fixed sparse
+Program Bank.
 
-| Dataset | Cells | Train/validation/test donors | Retained pathways |
+| Dataset | Cells | Training / validation / test individuals | Retained pathways |
 |---|---:|---:|---:|
 | AIDA Phase 1 | 610,279 | 437 / 94 / 94 | 181 |
 | GSE158055 | 179,488 | 126 / 27 / 28 | 130 |
@@ -60,8 +97,42 @@ gene vocabulary, pretrained cell-encoder checkpoint, and Reactome gene sets.
 Validate a downloaded bundle before training:
 
 ```bash
-python scripts/validate_data_bundle.py --data-root /path/to/scDecAge_Data
+python scripts/validate_data_bundle.py \
+  --data-root /path/to/scDecAge_Data
 ```
+
+## Preprocessing and Program Bank construction
+
+The distributed caches can be regenerated from a normalized, log-transformed
+h5ad file. Highly variable genes must be selected using training cells before
+running these commands, as described in the manuscript.
+
+```bash
+python scripts/prepare_tokens.py \
+  --h5ad dataset/processed.h5ad \
+  --vocab scDecAge_Data/shared/human_gene_vocab.json \
+  --output-dir dataset/cache
+
+python scripts/build_cell_pools.py \
+  --metadata dataset/cache/cell_metadata.parquet \
+  --output-dir dataset/cell_pools
+
+python scripts/compute_pathway_scores.py \
+  --h5ad dataset/processed.h5ad \
+  --vocab scDecAge_Data/shared/human_gene_vocab.json \
+  --gene-sets scDecAge_Data/shared/GeneSets.json \
+  --split dataset/donor_splits.csv \
+  --output-dir dataset/cache
+
+python scripts/build_program_routes.py \
+  --dataset-dir dataset \
+  --output dataset/program_routes.csv
+```
+
+Program Bank construction uses training-cell pathway activity without age
+labels. The resulting 64 program definitions are fixed before model fitting
+and reused for validation, testing, sampling-depth experiments, and repeated
+optimization runs.
 
 ## Training
 
@@ -69,38 +140,65 @@ python scripts/validate_data_bundle.py --data-root /path/to/scDecAge_Data
 python scripts/train_scdecage.py \
   --config configs/onek1k.json \
   --data-root /path/to/scDecAge_Data \
-  --output-dir runs/onek1k
+  --output-dir runs/onek1k/seed_20260720
 ```
 
-The training script selects checkpoints by donor-level validation MAE and
-writes `best.pth`, `history.csv`, `val_predictions.csv`, and
-`test_predictions.csv` to the output directory.
+The script jointly fine-tunes the cell encoder and donor-level modules with
+AdamW, cosine learning-rate decay, normalized donor-level Huber loss, and
+gradient clipping. Early stopping and checkpoint selection use donor-level
+validation MAE. The output directory contains `best.pth`, `history.csv`,
+`val_predictions.csv`, `test_predictions.csv`, and `metrics.json`.
 
-## Prediction
+The manuscript reports five optimization runs for each configuration. Use
+`--seed` to launch the remaining runs while retaining the same donor partitions
+and realized cellular input files:
+
+```bash
+python scripts/train_scdecage.py \
+  --config configs/onek1k.json \
+  --data-root /path/to/scDecAge_Data \
+  --seed 20260721 \
+  --output-dir runs/onek1k/seed_20260721
+```
+
+For the 750- or 1,000-cell experiment, pass the corresponding cellular input
+file and depth. The dataset-specific batch size is resolved from the mapping in
+the configuration file.
+
+```bash
+python scripts/train_scdecage.py \
+  --config configs/onek1k.json \
+  --data-root /path/to/scDecAge_Data \
+  --cells-per-donor 1000 \
+  --cell-pool cell_pools/cells1000.parquet \
+  --output-dir runs/onek1k/cells1000_seed_20260720
+```
+
+## Prediction and cellular weights
 
 ```bash
 python scripts/predict_scdecage.py \
-  --checkpoint runs/onek1k/best.pth \
+  --checkpoint runs/onek1k/seed_20260720/best.pth \
+  --data-root /path/to/scDecAge_Data \
   --dataset-dir /path/to/scDecAge_Data/datasets/OneK1K_CELLxGENE \
   --split test \
   --output predictions.csv
 ```
 
-RAGA cell-importance weights used for downstream cellular analyses can be
-exported with `scripts/export_cell_importance.py`.
-
-## Preprocessing
-
-The distributed cache can be regenerated from a processed h5ad file:
+RAGA cellular weights used in the manuscript's downstream analyses can be
+exported without retraining:
 
 ```bash
-python scripts/prepare_tokens.py --h5ad dataset.h5ad --vocab human_gene_vocab.json --output-dir cache
-python scripts/compute_pathway_scores.py --h5ad dataset.h5ad --vocab human_gene_vocab.json --gene-sets GeneSets.json --split donor_splits.csv --output-dir cache
+python scripts/export_cell_importance.py \
+  --checkpoint runs/onek1k/seed_20260720/best.pth \
+  --config configs/onek1k.json \
+  --data-root /path/to/scDecAge_Data \
+  --output cell_importance.parquet
 ```
 
-See [docs/MODEL_ARCHITECTURE.md](docs/MODEL_ARCHITECTURE.md) for the model
-mapping to the manuscript and [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md)
-for the training protocol.
+See [docs/MODEL_ARCHITECTURE.md](docs/MODEL_ARCHITECTURE.md) for the exact
+mapping between manuscript concepts and implementation, and
+[docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) for the evaluation protocol.
 
 ## License
 

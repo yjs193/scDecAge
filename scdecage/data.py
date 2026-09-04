@@ -54,7 +54,6 @@ class DonorProgramDataset(Dataset):
                 self.indices[str(donor)] = indices
         self.donors = [donor for donor in self.donors if donor in self.indices]
         self.ages = self.metadata.groupby("donor_id", observed=True)["age_years"].first().to_dict()
-        self.type_ids = self.metadata["cell_type_id"].to_numpy(np.int64)
         self.cells_per_donor = int(cells_per_donor)
         self.max_genes = int(max_genes)
         self.seed = int(seed)
@@ -70,34 +69,11 @@ class DonorProgramDataset(Dataset):
     def _sample(self, indices: np.ndarray, item: int) -> np.ndarray:
         if len(indices) <= self.cells_per_donor:
             return indices.copy()
-        types = self.type_ids[indices]
         seed = self.seed + item * 1009
         if self.split == "train":
             seed += self.epoch * 100003
         rng = np.random.default_rng(seed)
-        unique, counts = np.unique(types, return_counts=True)
-        minimum = min(2, max(1, self.cells_per_donor // max(1, len(unique))))
-        allocation = {int(t): min(int(n), minimum) for t, n in zip(unique, counts)}
-        remaining = self.cells_per_donor - sum(allocation.values())
-        if remaining > 0:
-            capacity = np.asarray(
-                [max(0, int(n) - allocation[int(t)]) for t, n in zip(unique, counts)]
-            )
-            raw = remaining * capacity / max(1, capacity.sum())
-            additional = np.floor(raw).astype(int)
-            for cell_type, count in zip(unique, additional):
-                allocation[int(cell_type)] += int(count)
-            left = remaining - int(additional.sum())
-            for position in np.argsort(-(raw - additional))[:left]:
-                allocation[int(unique[position])] += 1
-        chosen = []
-        for cell_type in unique:
-            local = indices[types == cell_type]
-            count = min(len(local), allocation[int(cell_type)])
-            chosen.append(rng.choice(local, count, replace=False))
-        result = np.concatenate(chosen)
-        rng.shuffle(result)
-        return result
+        return rng.choice(indices, self.cells_per_donor, replace=False)
 
     def __getitem__(self, item: int) -> dict:
         donor = self.donors[item]

@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 
 from .cell_encoder import PretrainedCellEncoder, load_pretrained_cell_encoder
-from .model import RAGAAggregator, ScDecAge, load_manuscript_state
+from .model import ScDecAge, ScDecAgeAggregator, load_manuscript_state
 from .routes import load_program_routes
 
 
@@ -38,7 +38,7 @@ def build_model(
         )
     else:
         encoder = PretrainedCellEncoder(len(vocab), padding_idx=vocab["<pad>"])
-    aggregator = RAGAAggregator(
+    aggregator = ScDecAgeAggregator(
         cell_dim=encoder.output_dim,
         num_pathways=len(pathway_names),
         vocab_size=len(vocab),

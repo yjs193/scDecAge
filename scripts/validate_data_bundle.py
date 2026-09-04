@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 from pathlib import Path
 
@@ -40,9 +41,15 @@ def main() -> None:
     for dataset in DATASETS:
         root = args.data_root / "datasets" / dataset
         required = [
-            "donor_splits.csv", "program_routes.csv", "cache/gene_ids.int32.npy",
-            "cache/expression_values.float16.npy", "cache/pathway_scores.float16.npy",
-            "cache/pathway_names.json", "cache/cell_metadata.parquet",
+            "processed.h5ad", "dataset_info.json", "donor_splits.csv",
+            "program_routes.csv", "program_routes.metadata.json",
+            "cache/gene_ids.int32.npy", "cache/expression_values.float16.npy",
+            "cache/pathway_scores.float16.npy", "cache/pathway_names.json",
+            "cache/pathway_train_variance.float32.npy",
+            "cache/pathway_cache_metadata.json", "cache/filtered_reactome.json",
+            "cache/cell_metadata.parquet", "cell_pools/sampling_metadata.json",
+            "cell_pools/cells500.parquet",
+            "cell_pools/cells750.parquet", "cell_pools/cells1000.parquet",
         ]
         dataset_missing = False
         for relative in required:
@@ -56,8 +63,24 @@ def main() -> None:
         pathways = np.load(root / "cache/pathway_scores.float16.npy", mmap_mode="r")
         metadata = pd.read_parquet(root / "cache/cell_metadata.parquet")
         splits = pd.read_csv(root / "donor_splits.csv")
+        required_metadata = {"cell_index", "donor_id", "age_years", "cell_type"}
+        if missing := required_metadata - set(metadata):
+            errors.append(f"{dataset}: cell metadata lacks {sorted(missing)}")
+            continue
+        if not np.array_equal(
+            metadata["cell_index"].to_numpy(), np.arange(len(metadata))
+        ):
+            errors.append(f"{dataset}: cell_index must match cache row order")
         if not (len(ids) == len(values) == len(pathways) == len(metadata)):
             errors.append(f"{dataset}: inconsistent cache row counts")
+        if ids.shape != values.shape:
+            errors.append(f"{dataset}: gene ID and expression arrays have different shapes")
+        if pathways.ndim != 2:
+            errors.append(f"{dataset}: pathway score cache must be two-dimensional")
+        required_splits = {"donor_id", "split"}
+        if missing := required_splits - set(splits):
+            errors.append(f"{dataset}: donor_splits.csv lacks {sorted(missing)}")
+            continue
         if not {"train", "val", "test"}.issubset(set(splits["split"])):
             errors.append(f"{dataset}: donor_splits.csv lacks train/val/test")
         donor_sets = {
@@ -72,14 +95,78 @@ def main() -> None:
         if missing_donors:
             errors.append(f"{dataset}: {len(missing_donors)} split donors lack cached cells")
         route = pd.read_csv(root / "program_routes.csv")
+        required_route = {"program", "rank", "pathway", "weight"}
+        if missing := required_route - set(route):
+            errors.append(f"{dataset}: program routes lack {sorted(missing)}")
+            continue
         if route["program"].nunique() != 64:
             errors.append(f"{dataset}: expected 64 programs")
         if not route.groupby("program").size().eq(8).all():
             errors.append(f"{dataset}: every program must contain eight pathways")
+        if (route["weight"] <= 0).any():
+            errors.append(f"{dataset}: program-route weights must be positive")
+        if not np.allclose(route.groupby("program")["weight"].sum(), 1.0):
+            errors.append(f"{dataset}: program-route weights must sum to one")
+        program_sets = [
+            set(group["pathway"].astype(str))
+            for _, group in route.groupby("program", sort=True)
+        ]
+        if any(
+            len(left & right) > 2
+            for left, right in itertools.combinations(program_sets, 2)
+        ):
+            errors.append(f"{dataset}: pairwise Program overlap exceeds two pathways")
         pathway_names = json.loads((root / "cache/pathway_names.json").read_text())
+        if pathways.shape[1] != len(pathway_names):
+            errors.append(f"{dataset}: pathway names and score columns differ")
         unknown_pathways = set(route["pathway"]) - set(pathway_names)
         if unknown_pathways:
             errors.append(f"{dataset}: program routes contain unknown pathways")
+        pathway_metadata = json.loads(
+            (root / "cache/pathway_cache_metadata.json").read_text()
+        )
+        if pathway_metadata.get("retained_pathways") != len(pathway_names):
+            errors.append(f"{dataset}: pathway metadata has an inconsistent count")
+        route_metadata = json.loads((root / "program_routes.metadata.json").read_text())
+        if route_metadata.get("num_programs") != 64:
+            errors.append(f"{dataset}: route metadata has an inconsistent Program count")
+        sampling_metadata = json.loads(
+            (root / "cell_pools" / "sampling_metadata.json").read_text()
+        )
+        if sampling_metadata.get("method") != "uniform_without_replacement_within_individual":
+            errors.append(f"{dataset}: cellular sampling method is inconsistent")
+        if sampling_metadata.get("cell_type_annotations_used") is not False:
+            errors.append(f"{dataset}: cellular sampling must not use cell-type labels")
+        valid_indices = set(metadata["cell_index"].astype(int))
+        expected_donor = metadata.set_index("cell_index")["donor_id"].astype(str)
+        available_per_donor = metadata.groupby(
+            metadata["donor_id"].astype(str), observed=True
+        ).size()
+        for depth in (500, 750, 1000):
+            pool = pd.read_parquet(root / "cell_pools" / f"cells{depth}.parquet")
+            required_pool = {"cell_index", "donor_id"}
+            if missing := required_pool - set(pool):
+                errors.append(f"{dataset}: cells{depth}.parquet lacks {sorted(missing)}")
+                continue
+            pool_indices = pool["cell_index"].astype(int)
+            if pool_indices.duplicated().any():
+                errors.append(f"{dataset}: cells{depth}.parquet has duplicate cells")
+            if not set(pool_indices).issubset(valid_indices):
+                errors.append(f"{dataset}: cells{depth}.parquet has unknown cell indices")
+                continue
+            pool_donors = pool["donor_id"].astype(str)
+            if not np.array_equal(
+                pool_donors.to_numpy(), expected_donor.loc[pool_indices].to_numpy()
+            ):
+                errors.append(f"{dataset}: cells{depth}.parquet has incorrect donor IDs")
+            observed_counts = pool.assign(donor_id=pool_donors).groupby(
+                "donor_id", observed=True
+            ).size()
+            expected_counts = available_per_donor.clip(upper=depth)
+            if not observed_counts.reindex(expected_counts.index, fill_value=0).equals(
+                expected_counts
+            ):
+                errors.append(f"{dataset}: cells{depth}.parquet has incorrect donor counts")
         summary_rows.append({
             "dataset": dataset,
             "cells": len(metadata),

@@ -7,8 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class RAGAAggregator(nn.Module):
-    """Final donor-level architecture used by scDecAge.
+class ScDecAgeAggregator(nn.Module):
+    """RAGA and pathway-guided Program aggregation for one individual.
 
     Parameter names retain compatibility with manuscript checkpoints trained by
     the original experimental code. Public outputs consistently use "program".
@@ -187,11 +187,17 @@ class RAGAAggregator(nn.Module):
         pooling = (program_states @ self.slot_pool_query / math.sqrt(self.d_model)).softmax(0)
         program_summary = program_summary + pooling @ program_states
 
-        program_delta = self.concat_head(
+        program_correction = self.concat_head(
             torch.cat([global_state, program_summary], dim=0)
         ).squeeze(-1)
         program_gate = torch.sigmoid(self.scalar_slot_gate)
-        raw_age = raw_global_age + program_gate * program_delta
+        program_corrected_raw_age = raw_global_age + program_correction
+        # Equivalent to raw_global_age + program_gate * program_correction, but
+        # written explicitly as the adaptive gated fusion used by scDecAge.
+        raw_age = (
+            (1.0 - program_gate) * raw_global_age
+            + program_gate * program_corrected_raw_age
+        )
         predicted_age = self.age_center + self.age_half * torch.tanh(raw_age)
         global_age = self.age_center + self.age_half * torch.tanh(raw_global_age)
 
@@ -247,10 +253,14 @@ class RAGAAggregator(nn.Module):
         return result
 
 
+# Backward-compatible alias for checkpoints and early public code.
+RAGAAggregator = ScDecAgeAggregator
+
+
 class ScDecAge(nn.Module):
     """Cell encoder followed by RAGA and pathway-guided programs."""
 
-    def __init__(self, encoder: nn.Module, aggregator: RAGAAggregator) -> None:
+    def __init__(self, encoder: nn.Module, aggregator: ScDecAgeAggregator) -> None:
         super().__init__()
         self.encoder = encoder
         self.aggregator = aggregator

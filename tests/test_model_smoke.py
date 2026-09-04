@@ -1,7 +1,7 @@
 import torch
 
 from scdecage.cell_encoder import PretrainedCellEncoder
-from scdecage.model import RAGAAggregator, ScDecAge
+from scdecage.model import RAGAAggregator, ScDecAge, ScDecAgeAggregator
 
 
 def test_scdecage_forward_cpu() -> None:
@@ -10,7 +10,8 @@ def test_scdecage_forward_cpu() -> None:
     encoder = PretrainedCellEncoder(vocab_size, embed_dim=16, depth=2, num_heads=4)
     route = torch.zeros(4, 6)
     route[:, :3] = 1 / 3
-    aggregator = RAGAAggregator(
+    assert RAGAAggregator is ScDecAgeAggregator
+    aggregator = ScDecAgeAggregator(
         cell_dim=encoder.output_dim,
         num_pathways=6,
         vocab_size=vocab_size,
@@ -32,4 +33,11 @@ def test_scdecage_forward_cpu() -> None:
     assert len(output["aux"]) == 2
     assert output["aux"][0]["cell_weights"].shape == (5,)
     assert output["aux"][0]["program_membership"].shape == (5, 4)
+    assert torch.allclose(output["aux"][0]["cell_weights"].sum(), torch.tensor(1.0))
+    assert torch.allclose(
+        output["aux"][0]["program_routes"].sum(dim=1), torch.ones(4)
+    )
+    assert output["aux"][0]["program_membership"].min() >= 0
+    assert output["aux"][0]["program_membership"].max() <= 1
     assert torch.isfinite(output["pred_age"]).all()
+    assert torch.all((output["pred_age"] >= 18) & (output["pred_age"] <= 90))
