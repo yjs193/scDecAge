@@ -55,9 +55,7 @@ python scripts/evaluate_scdecage.py \
 
 ## Tutorials
 
-The analysis notebooks load model parameters, compute experimental results, and draw individual panels. The evaluation and pathway-program notebooks, and panels A/B of the cell-importance notebook, use the released analysis models. Set `SCDECAGE_RELEASE_DATA` to the extracted Zenodo `data` directory before running them.
-
-The combined-partition experiments in global aggregation, cell importance C–E, and cellular states include the model-loading, analysis, and plotting code. Fill in `MODEL_INPUTS` with the checkpoint, prepared data directory, and ordered test-cell file for each partition. Cellular states additionally requires the full-count expression data, cell annotations, and gene-set files. Saved outputs show the manuscript panels. [Reference tables](data/README.md) are provided separately.
+[Reference tables](data/README.md) are provided separately.
 
 | Topic | Notebook |
 |---|---|
@@ -70,9 +68,6 @@ The combined-partition experiments in global aggregation, cell importance C–E,
 
 Individual panels are displayed at a compact size and exported as PNG and editable SVG.
 
-## Model
-
-RAGA starts from the mean cellular representation and adds a learned, mean-centered cellular residual. Sparse Reactome routes define 64 population programs. Soft cell-to-program memberships produce donor-specific program states, which a Program Interaction Transformer combines with global context. Scalar gene-expression evidence and a gated program correction contribute to the final age prediction.
 
 ## Repository layout
 
