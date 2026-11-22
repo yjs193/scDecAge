@@ -1,0 +1,63 @@
+{
+  "dataset": "OneK1K",
+  "age_min": 19,
+  "age_max": 97,
+  "cells_per_donor": 1000,
+  "cell_pool": "cells1000.parquet",
+  "vocab": "human_gene_vocab.json",
+  "pretrained_checkpoint": "encoder_checkpoint.pth",
+  "max_genes": 192,
+  "num_programs": 64,
+  "d_model": 128,
+  "lambda_path": 0.1,
+  "head_init_std": 0.08,
+  "freeze_program_routes": true,
+  "program_gate_init": -2.0,
+  "head_learning_rate": 0.0001,
+  "encoder_learning_rate": 6e-05,
+  "weight_decay": 0.0001,
+  "batch_size": 1,
+  "epochs": 50,
+  "min_epochs": 10,
+  "patience": 3,
+  "huber_beta": 5.0,
+  "pathway_reconstruction_weight": 0.0,
+  "warmup_epochs": 1,
+  "max_grad_norm": 5.0,
+  "torch_num_threads": 4,
+  "pin_memory": false,
+  "minimum_learning_rate": 1e-05,
+  "architecture": "scalar_residual_fusion",
+  "encoder_initialization": "pretrained",
+  "checkpoint_metric": "val_loss",
+  "checkpoint_min_delta": 1e-08,
+  "evaluate_every_steps": 50,
+  "early_evaluation_epochs": 9,
+  "early_evaluate_every_steps": 0,
+  "evaluation_batch_size": 4,
+  "dataset_settings": {
+    "AIDA": {
+      "age_min": 19,
+      "age_max": 77,
+      "max_genes": 512,
+      "evaluation_batch_size": 2
+    },
+    "Indonesia": {
+      "age_min": 18,
+      "age_max": 60,
+      "max_genes": 300
+    },
+    "OneK1K": {
+      "age_min": 19,
+      "age_max": 97,
+      "max_genes": 192
+    },
+    "GSE158055": {
+      "age_min": 6,
+      "age_max": 92,
+      "max_genes": 240,
+      "evaluate_every_steps": 10,
+      "early_evaluate_every_steps": 10
+    }
+  }
+}
